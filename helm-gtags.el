@@ -122,8 +122,8 @@ Always update if value of this variable is nil."
   :type 'boolean
   :group 'helm-gtags)
 
-(defcustom helm-gtags-preselect-rtag t
-  "If non-nil, preselect current reference in rtag."
+(defcustom helm-gtags-set-preselect t
+  "If non-nil, preselect is set from current reference."
   :type 'boolean
   :group 'helm-gtags)
 
@@ -943,27 +943,6 @@ Always update if value of this variable is nil."
             (error "Faild: 'gtags -q'"))
           tagroot))))
 
-(defun helm-gtags--common (srcs tagname &optional preselect)
-  (let ((helm-quit-if-no-candidate t)
-        (helm-execute-action-at-once-if-one t)
-        (dir (helm-gtags--searched-directory))
-        (src (car srcs))
-        (presel (if (and preselect helm-gtags-preselect-rtag)
-                    (regexp-quote preselect) nil)))
-    (when (symbolp src)
-      (setq src (symbol-value src)))
-    (unless helm-gtags--use-otherwin
-      (setq helm-gtags--use-otherwin (helm-gtags--using-other-window-p)))
-    (when tagname
-      (setq helm-gtags--query tagname))
-    (let ((tagroot (helm-gtags--find-tag-simple)))
-      (helm-attrset 'helm-gtags-base-directory dir src)
-      (helm-attrset 'name (concat "GNU Global at " (or dir tagroot)) src)
-      (helm :sources srcs
-            :buffer helm-gtags--buffer
-            :preselect presel
-      ))))
-
 (defun helm-gtags--current-file-and-line ()
   (concat
    (cond
@@ -979,6 +958,32 @@ Always update if value of this variable is nil."
       (helm-gtags--base-directory))))
    ":"
    (number-to-string (line-number-at-pos))))
+
+(defun helm-gtags--preselect-from-current-buffer ()
+  (if helm-gtags-set-preselect
+      (regexp-quote (helm-gtags--current-file-and-line))
+    nil))
+
+(defun helm-gtags--common (srcs tagname &optional set_preselect)
+  (let ((helm-quit-if-no-candidate t)
+        (helm-execute-action-at-once-if-one t)
+        (dir (helm-gtags--searched-directory))
+        (src (car srcs))
+        (presel (if set_preselect
+                    (helm-gtags--preselect-from-current-buffer) nil)))
+    (when (symbolp src)
+      (setq src (symbol-value src)))
+    (unless helm-gtags--use-otherwin
+      (setq helm-gtags--use-otherwin (helm-gtags--using-other-window-p)))
+    (when tagname
+      (setq helm-gtags--query tagname))
+    (let ((tagroot (helm-gtags--find-tag-simple)))
+      (helm-attrset 'helm-gtags-base-directory dir src)
+      (helm-attrset 'name (concat "GNU Global at " (or dir tagroot)) src)
+      (helm :sources srcs
+            :buffer helm-gtags--buffer
+            :preselect presel
+      ))))
 
 ;;;###autoload
 (defun helm-gtags-find-tag (tag)
@@ -1000,23 +1005,21 @@ Always update if value of this variable is nil."
   "Jump to referenced point"
   (interactive
    (list (helm-gtags--read-tagname 'rtag (which-function))))
-  (helm-gtags--common '(helm-source-gtags-rtags)
-                      tag
-                      (helm-gtags--current-file-and-line)))
+  (helm-gtags--common '(helm-source-gtags-rtags) tag t))
 
 ;;;###autoload
 (defun helm-gtags-find-symbol (tag)
   "Jump to the symbol location"
   (interactive
    (list (helm-gtags--read-tagname 'symbol)))
-  (helm-gtags--common '(helm-source-gtags-gsyms) tag))
+  (helm-gtags--common '(helm-source-gtags-gsyms) tag t))
 
 ;;;###autoload
 (defun helm-gtags-find-pattern (pattern)
   "Grep and jump by gtags tag files."
   (interactive
    (list (helm-gtags--read-tagname 'pattern)))
-  (helm-gtags--common '(helm-source-gtags-pattern) pattern))
+  (helm-gtags--common '(helm-source-gtags-pattern) pattern t))
 
 (defun helm-gtags--find-file-after-hook ()
   (helm-gtags--push-context helm-gtags--saved-context))
@@ -1037,7 +1040,7 @@ Always update if value of this variable is nil."
 Jump to definition point if cursor is on its reference.
 Jump to reference point if curosr is on its definition"
   (interactive)
-  (helm-gtags--common '(helm-source-gtags-find-tag-from-here) nil))
+  (helm-gtags--common '(helm-source-gtags-find-tag-from-here) nil t))
 
 ;;;###autoload
 (defun helm-gtags-dwim ()
@@ -1053,6 +1056,13 @@ Jump to reference point if curosr is on its definition"
       (if (thing-at-point 'symbol)
           (helm-gtags-find-tag-from-here)
         (call-interactively 'helm-gtags-find-tag)))))
+
+(defun helm-gtags--preselect-regexp-for-parse-file ()
+  (if helm-gtags-set-preselect
+      (concat "^[^[:space:]]+[[:space:]]+"
+              (number-to-string (line-number-at-pos))
+              "[[:space:]]+")
+    nil))
 
 (defun helm-gtags--set-parsed-file ()
   (let* ((this-file (file-name-nondirectory (buffer-file-name)))
@@ -1075,7 +1085,10 @@ You can jump definitions of functions, symbols in this file."
                         (file-relative-name helm-gtags--parsed-file
                                             helm-gtags--tag-location))
                 helm-source-gtags-parse-file)
-  (helm :sources '(helm-source-gtags-parse-file) :buffer helm-gtags--buffer))
+  (let ((presel (helm-gtags--preselect-regexp-for-parse-file)))
+    (helm :sources '(helm-source-gtags-parse-file)
+          :buffer helm-gtags--buffer
+          :preselect presel)))
 
 ;;;###autoload
 (defun helm-gtags-pop-stack ()
